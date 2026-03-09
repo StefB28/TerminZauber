@@ -1,0 +1,94 @@
+name: Backend E2E
+
+on:
+  push:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-e2e.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-e2e.yml'
+
+jobs:
+  backend-e2e:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: physiomatch
+          POSTGRES_PASSWORD: physiomatch_password
+          POSTGRES_DB: physiomatch
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U physiomatch -d physiomatch"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://physiomatch:physiomatch_password@localhost:5432/physiomatch?schema=public
+      JWT_SECRET: ci-jwt-secret
+      FRONTEND_URL: http://localhost:3000
+      E2E_BASE_URL: http://127.0.0.1:4000
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run migrations
+        run: npx prisma migrate deploy
+
+      - name: Build backend
+        run: npm run build
+
+      - name: Start backend
+        run: |
+          node dist/src/main.js > /tmp/backend.log 2>&1 &
+          echo $! > /tmp/backend.pid
+
+      - name: Wait for backend health
+        run: |
+          for i in {1..45}; do
+            if curl -fsS http://127.0.0.1:4000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Backend did not become healthy in time"
+          cat /tmp/backend.log || true
+          exit 1
+
+      - name: Run e2e tests
+        run: npm run test:e2e
+
+      - name: Show backend logs on failure
+        if: failure()
+        run: cat /tmp/backend.log || true
+
+      - name: Stop backend
+        if: always()
+        run: |
+          if [ -f /tmp/backend.pid ]; then
+            kill "$(cat /tmp/backend.pid)" || true
+          fi

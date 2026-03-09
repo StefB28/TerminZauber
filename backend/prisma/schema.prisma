@@ -1,0 +1,320 @@
+// PhysioMatch Database Schema
+// PostgreSQL with Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  PATIENT
+  THERAPIST
+  ADMIN
+}
+
+enum AboTyp {
+  BASIS
+  PRO
+}
+
+enum AboStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum AppointmentStatus {
+  FREI
+  GEBUCHT
+  KURZFRISTIG_FREI
+  ABGESAGT
+  ABGESCHLOSSEN
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String
+  password      String
+  role          UserRole @default(PATIENT)
+  emailVerified Boolean  @default(false)
+
+  // Optional: für Therapeuten und Admins
+  practiceId    String?
+  practice      Practice? @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  // Für Patienten
+  telefon       String?
+  plz           String?
+
+  // Relationen
+  appointments  Appointment[]
+  ratings       Rating[]
+  waitingLists  WaitingList[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([email])
+  @@index([practiceId])
+}
+
+model Practice {
+  id            String      @id @default(cuid())
+  name          String
+  adresse       String
+  plz           String
+  stadt         String
+  telefon       String
+  mobile        String?
+  email         String      @unique
+  beschreibung  String?     @db.Text
+
+  // Geolocation für Umkreissuche
+  latitude      Float?
+  longitude     Float?
+
+  // Abonnement
+  aboTyp        AboTyp      @default(BASIS)
+  aboStatus     AboStatus   @default(INACTIVE)
+
+  // Stripe
+  stripeCustomerId String?  @unique
+
+  // Relationen
+  users         User[]
+  therapists    Therapist[]
+  appointments  Appointment[]
+  subscription  Subscription?
+  payments      Payment[]
+  ratings       Rating[]
+  specialties   PracticeSpecialty[]
+  waitingLists  WaitingList[]
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([plz])
+  @@index([stadt])
+  @@index([latitude, longitude])
+}
+
+model Therapist {
+  id            String   @id @default(cuid())
+  name          String
+
+  practiceId    String
+  practice      Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  // Relationen
+  availability  Availability[]
+  appointments  Appointment[]
+  specialties   TherapistSpecialty[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([practiceId])
+}
+
+model Availability {
+  id            String            @id @default(cuid())
+
+  therapistId   String
+  therapist     Therapist         @relation(fields: [therapistId], references: [id], onDelete: Cascade)
+
+  datum         DateTime          @db.Date
+  startzeit     DateTime          @db.Time
+  endzeit       DateTime          @db.Time
+  status        AppointmentStatus @default(FREI)
+
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([therapistId])
+  @@index([datum])
+  @@index([status])
+}
+
+model Appointment {
+  id            String            @id @default(cuid())
+
+  practiceId    String
+  practice      Practice          @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  therapistId   String
+  therapist     Therapist         @relation(fields: [therapistId], references: [id], onDelete: Cascade)
+
+  patientId     String
+  patient       User              @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  datum         DateTime          @db.Date
+  uhrzeit       DateTime          @db.Time
+  dauer         Int               @default(30) // in Minuten
+  status        AppointmentStatus @default(GEBUCHT)
+
+  // Notizen
+  patientNotes  String?           @db.Text
+  practiceNotes String?           @db.Text
+
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([practiceId])
+  @@index([therapistId])
+  @@index([patientId])
+  @@index([datum])
+  @@index([status])
+}
+
+model Subscription {
+  id                String    @id @default(cuid())
+
+  practiceId        String    @unique
+  practice          Practice  @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  stripeCustomerId  String
+  stripeSubscriptionId String @unique
+
+  aboTyp            AboTyp    @default(BASIS)
+  laufzeit          String    // "monthly" oder "yearly"
+  status            AboStatus @default(ACTIVE)
+
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([practiceId])
+  @@index([status])
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+
+  practiceId        String
+  practice          Practice      @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  stripePaymentId   String        @unique
+  betrag            Float         // in Euro
+  zahlungsdatum     DateTime
+  status            PaymentStatus @default(PENDING)
+
+  // Details
+  aboTyp            AboTyp
+  invoice_url       String?
+
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([practiceId])
+  @@index([status])
+}
+
+model Rating {
+  id            String   @id @default(cuid())
+
+  practiceId    String
+  practice      Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  patientId     String
+  patient       User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  rating        Int      // 1-5 Sterne
+  comment       String?  @db.Text
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([practiceId])
+  @@index([patientId])
+}
+
+model TreatmentType {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  beschreibung  String?  @db.Text
+  dauer         Int      @default(30) // in Minuten
+
+  // Relations
+  therapists    TherapistSpecialty[]
+  practices     PracticeSpecialty[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model TherapistSpecialty {
+  id            String   @id @default(cuid())
+  therapistId   String
+  therapist     Therapist @relation(fields: [therapistId], references: [id], onDelete: Cascade)
+  
+  treatmentId   String
+  treatment     TreatmentType @relation(fields: [treatmentId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([therapistId, treatmentId])
+  @@index([therapistId])
+  @@index([treatmentId])
+}
+
+model PracticeSpecialty {
+  id            String   @id @default(cuid())
+  practiceId    String
+  practice      Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  
+  treatmentId   String
+  treatment     TreatmentType @relation(fields: [treatmentId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([practiceId, treatmentId])
+  @@index([practiceId])
+  @@index([treatmentId])
+}
+
+model WaitingList {
+  id            String   @id @default(cuid())
+
+  // Zuordnung
+  practiceId    String?
+  practice      Practice? @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  patientId     String?
+  patient       User?    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  patientEmail  String
+  plz           String
+  wunschdatum   DateTime @db.Date
+  radius        Int      @default(30) // in km
+
+  notified      Boolean  @default(false)
+  notifiedAt    DateTime?
+  isActive      Boolean  @default(true)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([plz])
+  @@index([wunschdatum])
+  @@index([notified])
+  @@index([practiceId])
+  @@index([patientId])
+  @@index([isActive])
+}

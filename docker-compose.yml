@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: physiomatch-db
+    restart: always
+    environment:
+      POSTGRES_USER: physiomatch
+      POSTGRES_PASSWORD: physiomatch_password
+      POSTGRES_DB: physiomatch
+    # Only expose to internal network, not to host
+    expose:
+      - "5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - physiomatch-network
+
+  # Backend API (NestJS)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        CACHE_BUST: ${CACHE_BUST:-default}
+    container_name: physiomatch-backend
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://physiomatch:physiomatch_password@db:5432/physiomatch?schema=public
+      JWT_SECRET: ${JWT_SECRET:-physiomatch-secret-key-change-in-production}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      FRONTEND_URL: ${FRONTEND_URL:-https://localhost}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM:-noreply@physiomatch.de}
+      PORT: 4000
+    # Only expose to internal network
+    expose:
+      - "4000"
+    depends_on:
+      - db
+    networks:
+      - physiomatch-network
+    command: >
+      sh -c "npx prisma migrate deploy && npm run start:prod"
+
+  # Frontend (Next.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: physiomatch-frontend
+    restart: always
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://localhost/api}
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}
+    # Only expose to internal network
+    expose:
+      - "3000"
+    depends_on:
+      - backend
+    networks:
+      - physiomatch-network
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: physiomatch-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./ssl:/etc/letsencrypt:ro
+      - ./certbot:/var/www/certbot:rw
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - physiomatch-network
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+
+volumes:
+  postgres_data:
+
+networks:
+  physiomatch-network:
+    driver: bridge

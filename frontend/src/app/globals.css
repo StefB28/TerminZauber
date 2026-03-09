@@ -1,0 +1,28 @@
+@import url('https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;500;600;700&family=Fauna+One&family=Cinzel:wght@400;500;600;700;800;900&family=Lobster&family=Poppins:wght@300;400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import 'leaflet/dist/leaflet.css';
+
+* {
+  font-family: 'Fauna One', serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Fauna One', serif;
+  font-weight: bold;
+}
+
+.font-bodoni {
+  font-family: 'Lobster', cursive;
+}
+
+.font-handwriting {
+  font-family: 'Dancing Script', cursive;
+}
+
+.font-heading {
+  font-family: 'Poppins', sans-serif;
+}
